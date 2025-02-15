@@ -1,0 +1,35 @@
+Available Commands & Their Functions ✅
+
+	•	/start – Initializes the bot.
+	•	/myinfo – Displays user information.
+	•	/users – Lists registered users.
+	•	/add <user> <amount> – Adds coins to a user.
+	•	/deduct <user> <amount> – Deducts coins from a user.
+	•	/check – Shows remaining attack time.
+	•	/status – Displays bot/system status.
+
+Keyboard Buttons & Their Functions ✅
+
+Main Actions
+
+	•	🚀 Attack – Likely initiates an attack.
+	•	👤 My Info – Displays user account information.
+	•	💰 Buy Coins – Opens the coin purchase menu.
+	•	⚙️ Settings – Accesses bot settings.
+	•	⏺️ Terminal – Opens a command execution menu.
+
+Attack & Configuration Options
+
+	•	Threads – Adjusts the number of attack threads.
+	•	Binary – Changes the attack binary.
+	•	Packets – Modifies the number of packets sent.
+	•	Parameters – Allows users to set additional parameters.
+	•	Cooldown Time– Configures the cooldown time between attacks.
+	•	Attack Time – Sets the duration of an attack.
+	•	Attack cost – Adjusts the coin cost per attack.
+
+Navigation & System Commands
+
+	•	Command – Likely executes a command.
+	•	Upload – Handles file uploads.
+	•	<< Back to Menu – Returns to the previous menu.
