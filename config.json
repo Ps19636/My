@@ -1,8 +1,8 @@
 {
     "initial_parameters": 1,
-    "initial_threads": "300",
-    "initial_packets": "9",
-    "initial_binary": "sharp",
+    "initial_threads": "200",
+    "initial_packets": "20",
+    "initial_binary": "shadow",
     "max_attack_time": 240,
     "attack_cooldown": 10,
     "cost_per_attack": 5
