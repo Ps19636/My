@@ -1,9 +1,5 @@
 {
-    "initial_parameters": 1,
-    "initial_threads": "200",
-    "initial_packets": "20",
-    "initial_binary": "shadow",
-    "max_attack_time": 240,
-    "attack_cooldown": 10,
-    "cost_per_attack": 5
+  "bot_token": "7359693638:AAF_KMXulEJtioG8YHqhmQ6enEeorJP_enY",
+  "admin_ids": ["1760458600"],
+  "attack_cooldown": 20
 }
